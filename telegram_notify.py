@@ -96,13 +96,8 @@ class TelegramNotifier:
         # 详细结果
         message += f"\n<b>📋 详细结果</b>\n"
         for i, result in enumerate(results, 1):
-            # 获取账号信息（隐藏部分）
+            # 获取账号信息（不隐藏）
             account = result.get('account', result.get('email', result.get('username', 'Unknown')))
-            if '@' in account:
-                # 隐藏邮箱部分内容
-                parts = account.split('@')
-                if len(parts[0]) > 3:
-                    account = parts[0][:3] + '***@' + parts[1]
             
             # 状态图标
             status_icon = "✅" if result.get('success', False) else "❌"
