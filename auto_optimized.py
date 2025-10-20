@@ -40,7 +40,7 @@ def load_accounts(filename='accounts.txt'):
         return accounts
 
 # 从文件加载账号列表
-accounts = load_accounts('accounts.txt')
+accounts = load_accounts('anyrouter-accounts.txt')
 
 login_url = 'https://anyrouter.top/login'
 
@@ -454,3 +454,4 @@ def main(send_notification=True):
 
 if __name__ == '__main__':
     main()
+
