@@ -45,34 +45,85 @@ accounts = load_accounts('anyrouter-accounts.txt')
 login_url = 'https://anyrouter.top/login'
 
 def get_balance_info(page):
-    """获取账户余额信息 - 基于实际页面结构优化"""
+    """获取账户余额信息 - 改进版，优先使用API"""
     try:
         balance_info = {}
-        
-        # 方法1: 直接通过文本内容和上下文获取余额信息
+
+        # 【核心修复】方法0: 直接调用 /api/user/self API 获取余额（最可靠）
         try:
-            # 获取所有包含美元符号的元素
+            print(f"[*] 方法0: 直接调用 /api/user/self API...")
+            api_response = page.evaluate('''
+                async () => {
+                    try {
+                        const response = await fetch('/api/user/self', {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json',
+                                'Cache-Control': 'no-cache'
+                            }
+                        });
+                        const data = await response.json();
+                        if (data.success && data.data) {
+                            return data.data;
+                        }
+                    } catch(e) {
+                        console.error('API调用失败:', e);
+                        return null;
+                    }
+                    return null;
+                }
+            ''')
+
+            if api_response and api_response.get('quota') is not None:
+                # 计算余额 (quota 单位: 500000 units = $1)
+                total_quota = api_response.get('quota', 0) / 500000
+                used_quota = api_response.get('used_quota', 0) / 500000
+                remaining = total_quota - used_quota
+                request_count = api_response.get('request_count', 0)
+
+                balance_info['api_remaining'] = f"${remaining:.2f}"
+                balance_info['api_used'] = f"${used_quota:.2f}"
+                balance_info['api_requests'] = str(request_count)
+                balance_info['username'] = api_response.get('display_name') or api_response.get('username', '')
+
+                print(f"[+] 方法0成功: 余额=${remaining:.2f}, 已用=${used_quota:.2f}, 请求={request_count}")
+
+                # 如果API方法成功，直接返回
+                result_parts = []
+                result_parts.append(f"💰 当前余额: ${remaining:.2f}")
+                result_parts.append(f"📊 历史消耗: ${used_quota:.2f}")
+                result_parts.append(f"🔢 请求次数: {request_count}")
+                if balance_info['username']:
+                    result_parts.append(f"👤 用户: {balance_info['username']}")
+                return " | ".join(result_parts)
+
+        except Exception as e:
+            print(f"[*] 方法0失败: {e}")
+
+        # 方法1: 直接通过文本内容和上下文获取余额信息（备用）
+        try:
+            print(f"[*] 方法1: 尝试从DOM解析余额...")
             balance_data = page.evaluate('''
                 () => {
                     const result = {};
-                    
+
                     // 查找所有包含美元符号的元素
-                    const dollarElements = Array.from(document.querySelectorAll('*')).filter(el => 
-                        el.textContent && 
-                        el.textContent.match(/\\$[0-9,]+\\.?[0-9]*/) && 
+                    const dollarElements = Array.from(document.querySelectorAll('*')).filter(el =>
+                        el.textContent &&
+                        el.textContent.match(/\\$[0-9,]+\\.?[0-9]*/) &&
                         el.children.length === 0  // 只要叶子节点
                     );
-                    
+
                     dollarElements.forEach(el => {
                         const text = el.textContent.trim();
                         const parent = el.parentElement;
                         const grandParent = parent ? parent.parentElement : null;
-                        
+
                         // 构建上下文
                         let context = '';
                         if (parent) context += parent.textContent;
                         if (grandParent) context += ' | ' + grandParent.textContent;
-                        
+
                         // 根据上下文分类
                         if (context.includes('当前余额')) {
                             result.currentBalance = text;
@@ -82,23 +133,23 @@ def get_balance_info(page):
                             result.statisticsQuota = text;
                         }
                     });
-                    
+
                     // 查找请求次数等数字信息
-                    const numberElements = Array.from(document.querySelectorAll('*')).filter(el => 
-                        el.textContent && 
-                        el.textContent.match(/^"?[0-9,]+"?$/) && 
+                    const numberElements = Array.from(document.querySelectorAll('*')).filter(el =>
+                        el.textContent &&
+                        el.textContent.match(/^"?[0-9,]+"?$/) &&
                         el.children.length === 0
                     );
-                    
+
                     numberElements.forEach(el => {
                         const text = el.textContent.trim().replace(/"/g, '');
                         const parent = el.parentElement;
                         const grandParent = parent ? parent.parentElement : null;
-                        
+
                         let context = '';
                         if (parent) context += parent.textContent;
                         if (grandParent) context += ' | ' + grandParent.textContent;
-                        
+
                         if (context.includes('请求次数')) {
                             result.requestCount = text;
                         } else if (context.includes('统计次数')) {
@@ -107,85 +158,48 @@ def get_balance_info(page):
                             result.statisticsTokens = text;
                         }
                     });
-                    
+
                     return result;
                 }
             ''')
-            
+
             if balance_data:
                 balance_info.update(balance_data)
-                
+                print(f"[+] 方法1成功: 从DOM获取到余额数据")
+
         except Exception as e:
             print(f"[*] 方法1获取余额失败: {e}")
-        
-        # 方法2: 通过localStorage获取用户数据
-        try:
-            user_data = page.evaluate('''
-                () => {
-                    try {
-                        const userStr = localStorage.getItem('user');
-                        if (userStr) {
-                            const user = JSON.parse(userStr);
-                            return {
-                                quota: user.quota || 0,
-                                used_quota: user.used_quota || 0,
-                                request_count: user.request_count || 0,
-                                username: user.username || '',
-                                display_name: user.display_name || ''
-                            };
-                        }
-                    } catch(e) {
-                        console.log('localStorage解析失败:', e);
-                    }
-                    return null;
-                }
-            ''')
-            
-            if user_data:
-                # 计算剩余额度 (根据网站的计费规则)
-                total_quota = user_data.get('quota', 0) / 500000  # 500000 units = $1
-                used_quota = user_data.get('used_quota', 0) / 500000
-                remaining = total_quota - used_quota
-                
-                balance_info['localStorage_remaining'] = f"${remaining:.2f}"
-                balance_info['localStorage_total'] = f"${total_quota:.2f}"
-                balance_info['localStorage_used'] = f"${used_quota:.2f}"
-                balance_info['localStorage_requests'] = str(user_data.get('request_count', 0))
-                balance_info['username'] = user_data.get('display_name') or user_data.get('username', '')
-                
-        except Exception as e:
-            print(f"[*] 方法2获取用户数据失败: {e}")
-        
+
         # 格式化输出
         if balance_info:
             result_parts = []
-            
-            # 优先显示页面显示的余额信息
-            if 'currentBalance' in balance_info:
+
+            # 优先显示API或DOM解析的余额信息
+            if 'api_remaining' in balance_info:
+                result_parts.append(f"💰 当前余额: {balance_info['api_remaining']}")
+            elif 'currentBalance' in balance_info:
                 result_parts.append(f"💰 当前余额: {balance_info['currentBalance']}")
-            elif 'localStorage_remaining' in balance_info:
-                result_parts.append(f"💰 剩余额度: {balance_info['localStorage_remaining']}")
-                
-            if 'historicalUsage' in balance_info:
+
+            if 'api_used' in balance_info:
+                result_parts.append(f"📊 历史消耗: {balance_info['api_used']}")
+            elif 'historicalUsage' in balance_info:
                 result_parts.append(f"📊 历史消耗: {balance_info['historicalUsage']}")
-            elif 'localStorage_used' in balance_info:
-                result_parts.append(f"📊 已用额度: {balance_info['localStorage_used']}")
-                
-            if 'requestCount' in balance_info:
+
+            if 'api_requests' in balance_info:
+                result_parts.append(f"🔢 请求次数: {balance_info['api_requests']}")
+            elif 'requestCount' in balance_info:
                 result_parts.append(f"🔢 请求次数: {balance_info['requestCount']}")
-            elif 'localStorage_requests' in balance_info:
-                result_parts.append(f"🔢 请求次数: {balance_info['localStorage_requests']}")
-                
+
             if 'statisticsQuota' in balance_info and balance_info['statisticsQuota'] != '$0.00':
                 result_parts.append(f"📈 统计额度: {balance_info['statisticsQuota']}")
-                
+
             if 'username' in balance_info:
                 result_parts.append(f"👤 用户: {balance_info['username']}")
-            
+
             return " | ".join(result_parts) if result_parts else None
-        
+
         return None
-        
+
     except Exception as e:
         print(f"[*] 获取余额信息时出错: {e}")
         return None
@@ -193,15 +207,14 @@ def get_balance_info(page):
 def optimized_login_and_sign(account):
     """优化版浏览器自动登录和签到"""
     print(f"[*] 正在处理账号: {account['username']}")
-    
+
     balance_info = None  # 存储余额信息
-    
+
     try:
         with sync_playwright() as p:
             # 使用无头浏览器，提高速度
             browser = p.chromium.launch(
                 headless=True,  # 无头模式，不显示窗口
-                channel="chrome",  # 使用系统Chrome
                 args=[
                     '--no-sandbox',
                     '--disable-dev-shm-usage',
@@ -213,11 +226,11 @@ def optimized_login_and_sign(account):
                     '--disable-ipc-flooding-protection'
                 ]
             )
-            
+
             # 创建页面并设置更快的超时
             page = browser.new_page()
-            page.set_default_timeout(10000)  # 10秒超时
-            
+            page.set_default_timeout(15000)  # 增加超时时间到15秒
+
             # 设置更真实的用户代理
             page.set_extra_http_headers({
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -226,10 +239,10 @@ def optimized_login_and_sign(account):
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1'
             })
-            
+
             print(f"[*] 访问登录页面...")
-            page.goto(login_url, wait_until='domcontentloaded')  # 只等待DOM加载，不等待所有资源
-            
+            page.goto(login_url, wait_until='networkidle')  # 【修复】等待网络空闲
+
             # 快速检测并关闭弹窗
             try:
                 close_button = page.locator('button:has-text("关闭公告")')
@@ -238,7 +251,7 @@ def optimized_login_and_sign(account):
                     print(f"[*] 关闭了系统公告")
             except:
                 pass
-            
+
             # 检查是否需要点击邮箱登录选项
             try:
                 email_login_button = page.locator('button:has-text("使用 邮箱或用户名 登录")')
@@ -248,29 +261,29 @@ def optimized_login_and_sign(account):
                     time.sleep(1)  # 短暂等待表单出现
             except:
                 pass
-            
+
             # 快速填写登录信息
             print(f"[*] 填写登录信息...")
-            
+
             # 填写用户名
             username_input = page.locator('#username, input[placeholder*="用户名"], input[placeholder*="邮箱"]').first
             username_input.fill(account['username'])
-            
+
             # 填写密码
             password_input = page.locator('#password, input[type="password"]').first
             password_input.fill(account['password'])
-            
+
             print(f"[*] 提交登录...")
             # 点击登录按钮
             login_button = page.locator('button:has-text("继续"), button[type="submit"], button:has-text("登录")').first
             login_button.click()
-            
+
             # 等待登录结果 - 检查URL变化或成功提示
             try:
                 # 方法1: 等待URL跳转到控制台
-                page.wait_for_url('**/console**', timeout=8000)
+                page.wait_for_url('**/console**', timeout=10000)  # 增加超时时间
                 print(f"[+] 账号 {account['username']} 登录成功！")
-                
+
             except:
                 try:
                     # 方法2: 等待成功提示出现
@@ -283,34 +296,43 @@ def optimized_login_and_sign(account):
                         return False
                     else:
                         print(f"[+] 账号 {account['username']} 可能登录成功（未检测到错误）")
-            
-            # 额外等待，确保页面完全加载
-            time.sleep(2)
-            
+
+            # 【关键修复】额外等待，确保页面完全加载和API请求完成
+            print(f"[*] 等待页面和API数据加载...")
+            time.sleep(3)  # 增加等待时间
+
+            # 再次等待网络空闲
+            try:
+                page.wait_for_load_state('networkidle', timeout=5000)
+            except:
+                pass
+
             # 检查当前URL，确认是否在控制台页面
             current_url = page.url
             if 'console' in current_url or 'dashboard' in current_url:
                 print(f"[+] 确认已进入控制台页面")
-                
-                # 等待页面完全加载
+
+                # 再等待一下确保数据加载
                 time.sleep(2)
-                
+
                 # 获取余额信息
                 balance_info = get_balance_info(page)
                 if balance_info:
                     print(f"💰 余额信息: {balance_info}")
-                
+                else:
+                    print(f"[!] 未能获取余额信息")
+
                 # 尝试自动签到（如果页面有签到功能）
                 try:
                     # 查找签到按钮或链接
                     sign_in_selectors = [
                         'button:has-text("签到")',
-                        'button:has-text("打卡")', 
+                        'button:has-text("打卡")',
                         'a:has-text("签到")',
                         '[data-testid="sign-in"]',
                         '.sign-in-button'
                     ]
-                    
+
                     signed_in = False
                     for selector in sign_in_selectors:
                         try:
@@ -322,27 +344,27 @@ def optimized_login_and_sign(account):
                                 break
                         except:
                             continue
-                    
+
                     if not signed_in:
                         print(f"[*] 未找到明显的签到按钮，可能已自动签到或无需手动签到")
-                    
+
                     # 签到后再次获取余额信息
                     time.sleep(1)
                     updated_balance_info = get_balance_info(page)
                     if updated_balance_info and updated_balance_info != balance_info:
                         print(f"💰 签到后余额: {updated_balance_info}")
                         balance_info = updated_balance_info  # 更新余额信息
-                        
+
                 except Exception as e:
                     print(f"[*] 签到检测过程中出现异常: {e}")
-                
+
             else:
                 print(f"[!] 未能确认登录状态，当前URL: {current_url}")
-            
+
             browser.close()
             print(f"[✓] 账号 {account['username']} 处理完成")
             return {'success': True, 'balance_info': balance_info}
-            
+
     except Exception as e:
         print(f"[!] 账号 {account['username']} 处理失败: {e}")
         try:
@@ -354,31 +376,31 @@ def optimized_login_and_sign(account):
 
 def main(send_notification=True):
     """主程序
-    
+
     Args:
         send_notification: 是否发送Telegram通知
     """
     print("=" * 70)
-    print("Optimized Auto Login Script (with balance display)")
+    print("Optimized Auto Login Script V2 (API-based balance retrieval)")
     print("=" * 70)
-    
+
     success_count = 0
     total_count = len(accounts)
     account_results = []  # 存储每个账号的结果
-    
+
     start_time = time.time()
-    
+
     for i, account in enumerate(accounts):
         print(f"\n📋 处理账号 {i+1}/{total_count}: {account['username']}")
-        
+
         account_start_time = time.time()
         result = optimized_login_and_sign(account)
         account_end_time = time.time()
-        
+
         # 处理新的返回格式
         success = result['success'] if isinstance(result, dict) else result
         balance_info = result.get('balance_info') if isinstance(result, dict) else None
-        
+
         account_result = {
             'username': account['username'],
             'success': success,
@@ -386,22 +408,22 @@ def main(send_notification=True):
             'balance_info': balance_info
         }
         account_results.append(account_result)
-        
+
         if success:
             success_count += 1
             print(f"✅ 成功 (耗时: {account_end_time - account_start_time:.1f}秒)")
         else:
             print(f"❌ 失败 (耗时: {account_end_time - account_start_time:.1f}秒)")
-        
+
         # 账号间随机延迟，避免被检测
         if i < total_count - 1:
             delay = random.randint(1, 3)
             print(f"⏰ 等待 {delay} 秒后处理下一个账号...")
             time.sleep(delay)
-    
+
     end_time = time.time()
     total_time = end_time - start_time
-    
+
     print("\n" + "=" * 70)
     print("📊 处理结果统计")
     print("=" * 70)
@@ -409,7 +431,7 @@ def main(send_notification=True):
     print(f"❌ 失败: {total_count - success_count}/{total_count}")
     print(f"⏱️  总耗时: {total_time:.1f} 秒")
     print(f"📈 平均每账号: {total_time/total_count:.1f} 秒")
-    
+
     # 显示账号详细信息
     print(f"\n💰 账号余额概览:")
     print("-" * 70)
@@ -417,7 +439,7 @@ def main(send_notification=True):
         username_short = result['username'].split('@')[0]  # 只显示用户名部分
         status = "✅ 登录成功" if result['success'] else "❌ 登录失败"
         duration = f"⏱️ {result['duration']:.1f}s"
-        
+
         if result['success'] and result['balance_info']:
             # 显示详细余额信息
             print(f"📧 {username_short:20} | {status} | {duration}")
@@ -427,9 +449,9 @@ def main(send_notification=True):
             print(f"📧 {username_short:20} | {status} | {duration}")
             if not result['success']:
                 print(f"   ❌ 无法获取余额信息")
-    
+
     print("=" * 70)
-    
+
     # 发送Telegram通知
     if send_notification:
         try:
@@ -449,10 +471,8 @@ def main(send_notification=True):
                 notifier.send_anyrouter_result(notification_results)
         except Exception as e:
             print(f"发送Telegram通知失败: {e}")
-    
+
     return account_results  # 返回结果供其他脚本使用
 
 if __name__ == '__main__':
     main()
-
-
