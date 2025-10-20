@@ -33,7 +33,7 @@ class LeafFlowAutoCheckin:
     def read_accounts(self):
         """读取账号列表"""
         try:
-            with open('account.txt', 'r', encoding='utf-8') as f:
+            with open('leaflow-account.txt', 'r', encoding='utf-8') as f:
                 lines = f.readlines()
             
             accounts = []
