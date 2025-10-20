@@ -114,7 +114,11 @@ class TelegramNotifier:
                 message += f"   💰 {result['balance_info']}\n"
             elif 'amount' in result and result['amount'] > 0:
                 message += f"   💰 获得: {result['amount']:.2f} 元\n"
-            
+
+            # 添加总余额信息（LeafFlow）
+            if 'total_balance' in result and result['total_balance'] > 0:
+                message += f"   💳 总余额: {result['total_balance']:.2f} 元\n"
+
             # 添加消息（如果有）
             if 'message' in result and result['message']:
                 message += f"   📝 {result['message']}\n"
