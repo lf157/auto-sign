@@ -2,7 +2,7 @@ name: 自动签到
 
 on:
   schedule:
-    # 每天北京时间早上11点运行 (UTC时间0点)
+    # 每天北京时间早上8点运行 (UTC时间0点)
     - cron: '0 3 * * *'
   workflow_dispatch:  # 允许手动触发
     inputs:
@@ -77,12 +77,7 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        python -c "
-from telegram_notify import TelegramNotifier
-notifier = TelegramNotifier()
-if notifier.is_configured():
-    notifier.send_message('✅ GitHub Actions 签到任务完成')
-        "
+        python -c "from telegram_notify import TelegramNotifier; notifier = TelegramNotifier(); notifier.send_message('✅ GitHub Actions 签到任务完成') if notifier.is_configured() else None"
     
     - name: 清理敏感文件
       if: always()
