@@ -52,45 +52,58 @@ def get_balance_info(page):
 
         # 方法0: 直接调用 /api/user/self API 获取余额（新增 - 最可靠）
         try:
-            print(f"[*] 方法0: 直接调用 /api/user/self API...")
-            api_response = page.evaluate('''
-                async () => {
-                    try {
-                        const response = await fetch('/api/user/self', {
-                            method: 'GET',
-                            headers: {
-                                'Accept': 'application/json',
-                                'Cache-Control': 'no-cache'
-                            }
-                        });
-                        const data = await response.json();
-                        if (data.success && data.data) {
-                            return data.data;
-                        }
-                    } catch(e) {
-                        console.error('API调用失败:', e);
-                        return null;
-                    }
+            print(f"[*] 方法0: 通过 API 调用获取余额...")
+
+            # 先从 localStorage 获取 user_id（API 需要 new-api-user header）
+            user_id = page.evaluate("""() => {
+                try {
+                    const user = JSON.parse(localStorage.getItem('user') || '{}');
+                    return user.id || null;
+                } catch(e) {
                     return null;
                 }
-            ''')
+            }""")
 
-            if api_response and api_response.get('quota') is not None:
-                # 计算余额 (quota 单位: 500000 units = $1)
-                total_quota = api_response.get('quota', 0) / 500000
-                used_quota = api_response.get('used_quota', 0) / 500000
-                remaining = total_quota - used_quota
-                request_count = api_response.get('request_count', 0)
+            if not user_id:
+                print(f"[!] 方法0失败: 无法从 localStorage 获取 user_id")
+            else:
+                # 使用 fetch 调用 API（带上必需的 header）
+                api_response = page.evaluate("""
+                    async (userId) => {
+                        try {
+                            const response = await fetch('/api/user/self', {
+                                method: 'GET',
+                                headers: {
+                                    'Accept': 'application/json',
+                                    'new-api-user': userId.toString()
+                                }
+                            });
+                            const data = await response.json();
+                            return data;
+                        } catch(e) {
+                            return null;
+                        }
+                    }
+                """, user_id)
 
-                balance_info['api_remaining'] = f"${remaining:.2f}"
-                balance_info['api_used'] = f"${used_quota:.2f}"
-                balance_info['api_requests'] = str(request_count)
-                balance_info['username'] = api_response.get('display_name') or api_response.get('username', '')
+                if api_response and api_response.get("success") and api_response.get("data"):
+                    user_data = api_response["data"]
 
-                print(f"[+] 方法0成功: 余额=${remaining:.2f}, 已用=${used_quota:.2f}, 请求={request_count}")
+                    total_quota = user_data["quota"] / 500000
+                    used_quota = user_data["used_quota"] / 500000
+                    remaining = total_quota - used_quota
+
+                    balance_info["api_remaining"] = f"${remaining:.2f}"
+                    balance_info["api_used"] = f"${used_quota:.2f}"
+                    balance_info["api_requests"] = str(user_data["request_count"])
+                    balance_info["username"] = user_data.get("display_name") or user_data.get("username", "")
+
+                    print(f"[+] 方法0成功: 余额=${remaining:.2f}, 已用=${used_quota:.2f}, 请求={user_data['request_count']}")
+                else:
+                    print(f"[!] 方法0失败: API返回无效数据")
 
         except Exception as e:
-            print(f"[*] 方法0失败: {e}")
+            print(f"[!] 方法0异常: {e}")
 
         # 方法1: 直接通过文本内容和上下文获取余额信息
         try:
