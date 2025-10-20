@@ -3,7 +3,7 @@ import random
 import os
 from playwright.sync_api import sync_playwright
 
-def load_accounts(filename='accounts.txt'):
+def load_accounts(filename='anyrouter-accounts.txt'):
     """从文件加载账号列表"""
     accounts = []
     if not os.path.exists(filename):
@@ -454,4 +454,5 @@ def main(send_notification=True):
 
 if __name__ == '__main__':
     main()
+
 
