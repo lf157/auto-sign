@@ -1,0 +1,93 @@
+name: 自动签到
+
+on:
+  schedule:
+    # 每天北京时间早上11点运行 (UTC时间0点)
+    - cron: '0 3 * * *'
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      send_notification:
+        description: '发送Telegram通知'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  auto-checkin:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v3
+    
+    - name: 设置 Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 缓存依赖
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: 安装依赖
+      run: |
+        pip install --upgrade pip
+        pip install playwright requests
+        playwright install chromium
+        playwright install-deps chromium
+    
+    - name: 解密账号文件
+      env:
+        ACCOUNTS_KEY: ${{ secrets.ACCOUNTS_KEY }}
+      run: |
+        # 如果你的账号文件是加密的，在这里解密
+        # 或者直接从 secrets 创建账号文件
+        echo "${{ secrets.ANYROUTER_ACCOUNTS }}" > anyrouter-accounts.txt
+        echo "${{ secrets.LEAFLOW_ACCOUNTS }}" > leaflow-account.txt
+    
+    - name: 运行 AnyRouter 签到
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python auto_optimized.py
+      continue-on-error: true  # 即使失败也继续下一个
+    
+    - name: 等待间隔
+      run: sleep 10
+    
+    - name: 运行 LeafFlow 签到  
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python leaflow_playwright.py
+      continue-on-error: true
+    
+    - name: 发送总结通知
+      if: always()  # 无论成功失败都执行
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python -c "
+from telegram_notify import TelegramNotifier
+notifier = TelegramNotifier()
+if notifier.is_configured():
+    notifier.send_message('✅ GitHub Actions 签到任务完成')
+        "
+    
+    - name: 清理敏感文件
+      if: always()
+      run: |
+        rm -f anyrouter-accounts.txt
+        rm -f leaflow-account.txt
+        rm -f *.log
+        rm -f *.txt
