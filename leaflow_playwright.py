@@ -153,6 +153,31 @@ class LeafFlowAutoCheckin:
         self.logger.error("❌ 所有点击方法都失败了")
         return False
     
+    def get_account_balance(self, page):
+        """获取账户总余额"""
+        try:
+            # 返回主页获取余额
+            page.goto("https://leaflow.net/workspaces", wait_until='domcontentloaded')
+            time.sleep(2)
+
+            # 从页面提取余额
+            total_balance = page.evaluate("""() => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const balanceBtn = buttons.find(btn => btn.textContent.includes('¥') && btn.textContent.includes('余额'));
+                if (balanceBtn) {
+                    const text = balanceBtn.textContent.trim();
+                    const match = text.match(/¥([\\d.]+)/);
+                    return match ? parseFloat(match[1]) : 0;
+                }
+                return 0;
+            }""")
+
+            return total_balance
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ 获取总余额失败: {str(e)}")
+            return 0
+
     def process_account(self, browser, account):
         """处理单个账号"""
         email = account['email']
@@ -253,6 +278,13 @@ class LeafFlowAutoCheckin:
                 result['message'] = f'获得 {amount:.2f} 元' if amount > 0 else '已签到'
                 result['success'] = True
                 self.logger.info(f"✅ 今日已签到，获得 {amount:.2f} 元")
+
+                # 获取账户总余额
+                total_balance = self.get_account_balance(page)
+                if total_balance > 0:
+                    result['total_balance'] = total_balance
+                    self.logger.info(f"💰 账户总余额: {total_balance:.2f} 元")
+
                 return result
             
             # 10. 执行签到
@@ -272,6 +304,13 @@ class LeafFlowAutoCheckin:
                     result['message'] = f'获得 {amount:.2f} 元'
                     result['success'] = True
                     self.logger.info(f"✅ 签到成功！获得 {amount:.2f} 元")
+                    
+                    # 获取账户总余额
+                    total_balance = self.get_account_balance(page)
+                    if total_balance > 0:
+                        result['total_balance'] = total_balance
+                        self.logger.info(f"💰 账户总余额: {total_balance:.2f} 元")
+                        
                 elif '今日已签到' in page_content or '已签到' in page_content:
                     result['status'] = '签到成功（已确认）'
                     result['amount'] = amount
@@ -286,6 +325,7 @@ class LeafFlowAutoCheckin:
                 result['status'] = '签到失败'
                 result['message'] = '无法点击签到按钮'
                 self.logger.error("❌ 无法点击签到按钮")
+
                 
         except Exception as e:
             result['status'] = '处理失败'
@@ -298,43 +338,9 @@ class LeafFlowAutoCheckin:
         return result
     
     def save_results(self):
-        """保存签到结果"""
-        timestamp = self.start_time.strftime('%Y%m%d_%H%M%S')
-        
-        # 保存文本报告
-        report_filename = f"checkin_report_{timestamp}.txt"
-        with open(report_filename, 'w', encoding='utf-8') as f:
-            f.write("=" * 60 + "\n")
-            f.write("LeafLow 自动签到报告 (Playwright版)\n")
-            f.write(f"执行时间: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 60 + "\n\n")
-            
-            success_count = sum(1 for r in self.results if r['success'])
-            total_amount = sum(r['amount'] for r in self.results)
-            
-            f.write(f"📊 统计信息\n")
-            f.write(f"总账号数: {len(self.results)}\n")
-            f.write(f"成功数量: {success_count}\n")
-            f.write(f"失败数量: {len(self.results) - success_count}\n")
-            f.write(f"成功率: {success_count/len(self.results)*100:.1f}%\n")
-            f.write(f"💰 总获得金额: {total_amount:.2f} 元\n\n")
-            
-            f.write("📋 详细结果:\n")
-            f.write("-" * 60 + "\n")
-            
-            for i, r in enumerate(self.results, 1):
-                status_icon = "✅" if r['success'] else "❌"
-                f.write(f"\n{i}. {status_icon} {r['email']}\n")
-                f.write(f"   状态: {r['status']}\n")
-                if r['amount'] > 0:
-                    f.write(f"   金额: {r['amount']:.2f} 元\n")
-                if r['message']:
-                    f.write(f"   备注: {r['message']}\n")
-                f.write(f"   时间: {r['time']}\n")
-            
-            f.write("\n" + "=" * 60 + "\n")
-        
-        self.logger.info(f"文本报告已保存: {report_filename}")
+        """保存签到结果 - 已禁用文件保存"""
+        # 不再保存文件，只在控制台输出
+        pass
     
     def run(self, send_notification=True):
         """运行主流程"""
@@ -410,8 +416,9 @@ class LeafFlowAutoCheckin:
         self.logger.info("\n📋 账号明细:")
         for i, r in enumerate(self.results, 1):
             status = "✅" if r['success'] else "❌"
-            amount_str = f" - {r['amount']:.2f}元" if r['amount'] > 0 else ""
-            self.logger.info(f"{i}. {status} {r['email']}: {r['status']}{amount_str}")
+            amount_str = f" - 签到获得: {r['amount']:.2f}元" if r['amount'] > 0 else ""
+            balance_str = f" - 总余额: {r['total_balance']:.2f}元" if r.get('total_balance', 0) > 0 else ""
+            self.logger.info(f"{i}. {status} {r['email']}: {r['status']}{amount_str}{balance_str}")
         
         # 保存结果
         self.save_results()
