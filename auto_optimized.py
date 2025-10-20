@@ -89,9 +89,9 @@ def get_balance_info(page):
                 if api_response and api_response.get("success") and api_response.get("data"):
                     user_data = api_response["data"]
 
-                    total_quota = user_data["quota"] / 500000
+                    # quota 就是当前余额，used_quota 是历史消耗
+                    remaining = user_data["quota"] / 500000
                     used_quota = user_data["used_quota"] / 500000
-                    remaining = total_quota - used_quota
 
                     balance_info["api_remaining"] = f"${remaining:.2f}"
                     balance_info["api_used"] = f"${used_quota:.2f}"
@@ -263,7 +263,7 @@ def optimized_login_and_sign(account):
             # 使用无头浏览器，提高速度
             browser = p.chromium.launch(
                 headless=True,  # 无头模式，不显示窗口
-                channel="chrome",  # 使用系统Chrome
+                # 自动选择 Chromium (兼容 GitHub Actions)
                 args=[
                     '--no-sandbox',
                     '--disable-dev-shm-usage',
@@ -291,16 +291,28 @@ def optimized_login_and_sign(account):
             
             print(f"[*] 访问登录页面...")
             page.goto(login_url, wait_until='domcontentloaded')  # 只等待DOM加载，不等待所有资源
-            
-            # 快速检测并关闭弹窗
+
+            # 增强弹窗处理
             try:
-                close_button = page.locator('button:has-text("关闭公告")')
-                if close_button.is_visible(timeout=2000):
+                # 方法1: 按 ESC 键关闭弹窗
+                page.keyboard.press('Escape')
+                time.sleep(0.5)
+
+                # 方法2: 点击关闭按钮
+                close_button = page.locator('button:has-text("关闭公告"), button:has-text("关闭"), .semi-modal-close').first
+                if close_button.is_visible(timeout=1000):
                     close_button.click()
-                    print(f"[*] 关闭了系统公告")
+                    print(f"[*] 关闭了弹窗")
+                    time.sleep(0.5)
+
+                # 方法3: 使用 JavaScript 强制移除所有弹窗
+                page.evaluate("""() => {
+                    const portals = document.querySelectorAll('.semi-portal, .semi-modal, .semi-dialog');
+                    portals.forEach(el => el.remove());
+                }""")
             except:
                 pass
-            
+
             # 检查是否需要点击邮箱登录选项
             try:
                 email_login_button = page.locator('button:has-text("使用 邮箱或用户名 登录")')
@@ -310,22 +322,33 @@ def optimized_login_and_sign(account):
                     time.sleep(1)  # 短暂等待表单出现
             except:
                 pass
-            
+
             # 快速填写登录信息
             print(f"[*] 填写登录信息...")
-            
+
             # 填写用户名
             username_input = page.locator('#username, input[placeholder*="用户名"], input[placeholder*="邮箱"]').first
             username_input.fill(account['username'])
-            
+
             # 填写密码
             password_input = page.locator('#password, input[type="password"]').first
             password_input.fill(account['password'])
-            
+
             print(f"[*] 提交登录...")
-            # 点击登录按钮
+
+            # 登录前再次确保没有弹窗遮挡
+            try:
+                page.keyboard.press('Escape')
+                page.evaluate("""() => {
+                    const portals = document.querySelectorAll('.semi-portal, .semi-modal');
+                    portals.forEach(el => el.remove());
+                }""")
+            except:
+                pass
+
+            # 点击登录按钮（使用强制点击）
             login_button = page.locator('button:has-text("继续"), button[type="submit"], button:has-text("登录")').first
-            login_button.click()
+            login_button.click(force=True)  # 强制点击，忽略遮挡
             
             # 等待登录结果 - 检查URL变化或成功提示
             try:
@@ -357,10 +380,6 @@ def optimized_login_and_sign(account):
                 # 等待页面完全加载
                 time.sleep(2)
                 
-                # 获取余额信息
-                balance_info = get_balance_info(page)
-                if balance_info:
-                    print(f"💰 余额信息: {balance_info}")
                 
                 # 尝试自动签到（如果页面有签到功能）
                 try:
@@ -388,12 +407,11 @@ def optimized_login_and_sign(account):
                     if not signed_in:
                         print(f"[*] 未找到明显的签到按钮，可能已自动签到或无需手动签到")
                     
-                    # 签到后再次获取余额信息
+                    # 签到后获取余额信息
                     time.sleep(1)
-                    updated_balance_info = get_balance_info(page)
-                    if updated_balance_info and updated_balance_info != balance_info:
-                        print(f"💰 签到后余额: {updated_balance_info}")
-                        balance_info = updated_balance_info  # 更新余额信息
+                    balance_info = get_balance_info(page)
+                    if balance_info:
+                        print(f"💰 余额信息: {balance_info}")
                         
                 except Exception as e:
                     print(f"[*] 签到检测过程中出现异常: {e}")
